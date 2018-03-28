@@ -1,0 +1,9 @@
+- name: Remove signed policy
+  raw: Set-ExecutionPolicy Bypass -Force
+  ignore_errors: yes
+
+- name: Add credssp client support
+  raw: enable-wsmancredssp -role client -delegatecomputer *.{{ domain }} -force
+    
+- name: Add credssp server support
+  raw: enable-wsmancredssp -role server -force

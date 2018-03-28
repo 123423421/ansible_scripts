@@ -1,0 +1,17 @@
+- name: Install Common Tools
+  win_chocolatey: 
+    name: "{{ item }}"
+    state: present
+    upgrade: true
+  with_items:
+    - "chocolatey"
+    - "powershell"
+    - "python"
+    - "python2"
+    - "openSSH"
+    - "notepadplusplus.install"
+    - "winscp"
+    - "firefox"
+    - "filezilla"
+    - "7zip"
+    

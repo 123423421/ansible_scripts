@@ -1,0 +1,42 @@
+# expects the following variables to be passed in with --extra-vars
+# hostname
+# ip
+
+- hosts: localhost
+  any_errors_fatal: true
+  tasks:
+    - name: Waiting for {{ ip }} port 22 to coming online... (control-c to cancel)
+      local_action: wait_for host={{ ip }} port={{ 22 }} state=started delay=2 timeout=600
+
+- hosts: '{{ ip }}'
+
+  gather_facts: true
+  tasks:
+
+    - name: set hostname to {{ hostname }}
+      hostname: name={{ hostname }} 
+      become: true
+
+- hosts: elmdev2-dc11.elmdev2.local
+  vars:
+    #ansible_user: ansible_svc
+    ansible_user:
+    ansible_password:
+    ansible_connection: winrm
+    ansible_winrm_server_cert_validation: ignore
+    ansible_winrm_transport: kerberos
+  
+  gather_facts: false
+  tasks: 
+  
+    - name: checking if DNS record already exists (this may fail)
+      raw: get-dnsserverresourcerecord -ZoneName "{{ hostvars['elmdev2-dc11.elmdev2.local']['domain'] }}" -RRType "A" -ComputerName "elmdev2-dc11.elmdev2.local" -name "{{ hostname }}"
+      ignore_errors: yes
+      register: dnsresult
+
+    - name: if already exists, delete it
+      raw: Remove-DnsServerResourceRecord -ZoneName "{{ hostvars['elmdev2-dc11.elmdev2.local']['domain'] }}" -RRType "A" -Name "{{ hostname }}" -Force
+      when: dnsresult|succeeded
+
+    - name: Add a new DNS record for "{{ hostname }}"
+      raw: add-dnsServerResourceRecordA -Name "{{ hostname }}" -ZoneName "{{ hostvars['elmdev2-dc11.elmdev2.local']['domain'] }}" -IPv4Address "{{ ip }}" 

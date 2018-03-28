@@ -1,0 +1,424 @@
+---
+
+
+- hosts: [dev2-moiweb]
+  serial: 1
+  vars:
+    ansible_user: '{{ moiinstall_usr }}'
+    ansible_winrm_transport: kerberos
+
+  vars_files:
+    - /ansible/ansible-playbooks/dev2/vars/webtier_config.yml
+
+  gather_facts: true
+
+  roles:
+    - CommonTools
+    - PowershellConfig
+
+  tasks:
+
+    - name: Create elm Ansible Dir
+      win_file: path=c:\elm\\ansible state=directory
+
+    - name: Install SQL Native client
+      win_chocolatey:
+        name: sql2012.nativeclient
+        state: present
+        upgrade: true
+
+    - name: Install SQL Command line utilities
+      win_chocolatey:
+        name: sqlserver-cmdlineutils
+        state: present
+        upgrade: true
+
+    - name: Install SQL 2012 Powershell extensions
+      win_chocolatey:
+        name: sql2012.powershell
+        state: present
+        upgrade: true
+
+    - name: Copy .NET 3.5 installer
+      win_copy:
+        src: /ansible/ansible-files/dev2/microsoft-windows-netfx3-ondemand-package.cab
+        dest: C:\elm\microsoft-windows-netfx3-ondemand-package.cab
+
+    - name: Install .NET 3.5
+      raw: Install-WindowsFeature Net-Framework-Core -source C:\elm\
+
+    - name: Remove .NET 3.5 installer
+      win_file:
+        path: C:\elm\microsoft-windows-netfx3-ondemand-package.cab
+        state: absent
+
+    - name: Install IIS
+      win_feature: 
+        name: "Web-Default-Doc,Web-Dir-Browsing,Web-Http-Errors,Web-Static-Content,Web-Http-Redirect,Web-Http-Logging,Web-Custom-Logging,Web-Log-Libraries,Web-ODBC-Logging,Web-Request-Monitor,Web-Http-Tracing,Web-Stat-Compression,Web-Dyn-Compression,Web-Filtering,Web-Basic-Auth,Web-Client-Auth,Web-Digest-Auth,Web-Cert-Auth,Web-IP-Security,Web-Url-Auth,Web-Windows-Auth,Web-Net-Ext45,Web-Asp-Net45,Web-ISAPI-Ext,Web-ISAPI-Filter,Web-WHC,Web-Mgmt-Console,Web-Scripting-Tools,Web-Mgmt-Service,NET-Framework-45-Core,NET-Framework-45-ASPNET,NET-WCF-HTTP-Activation45,NET-WCF-TCP-Activation45,NET-WCF-TCP-PortSharing45"
+        state: present
+        restart: no
+        #incude_sub_features: no
+      ignore_errors: yes
+
+    - name: Reboot after IIS install
+      raw: 'shutdown -r -f -t 5' 
+
+    - name: waiting for reboot
+      local_action: wait_for host={{ inventory_hostname }} port={{ ansible_port }} state=started delay=20 timeout=600
+
+    - name: Install Web Platform Installer
+      win_chocolatey:
+        name: webpi
+        upgrade: true
+
+    - name: Add intersrv to PATH
+      include: extend_path.yml
+      with_items:
+      - 'C:\Windows\system32\inetsrv'
+
+#
+#	Set Host file for my IP address
+#
+
+    - name: set up hostfile with local overrides
+      win_lineinfile:
+        dest: 'c:\windows\system32\drivers\etc\hosts'
+        backup: yes
+        create: yes
+        regexp: '^{{ ansible_ip_addresses[0] }}.*'
+        line: '{{ ansible_ip_addresses[0] }} moidev2 {{ moi_public_hostname }} moilogindev2 {{ moilogin_public_hostname }} sdpdev2 {{ sdp_public_hostname }} healthcheckdev2 {{ healthcheck_hostname }} elm {{ elm_public_hostname  }}'
+        state: present
+
+
+#
+# 	Create web folders with correct permissions
+#
+
+    - name: Create moilogin folder
+      win_file: path=C:\moilogin\images state=directory
+
+    - name: Add IWAM_moilogin permissions to moilogin
+      raw: 'icacls --% "C:\moilogin" /inheritance:r /grant:r "{{ shortdomain }}\IWAM_moilogin":(OI)(CI)(RX)'
+
+    - name: Add Adminstrators permissions to moilogin
+      raw: 'icacls --% "C:\moilogin" /grant "Administrators":(OI)(CI)(F)'
+
+    - name: Add IWAM_moilogin permissions to moilogin\images
+      raw: 'icacls --% "C:\moilogin\images" /inheritance:r /grant:r "{{ shortdomain }}\IWAM_moilogin":(OI)(CI)(IO)(R,W)'
+
+    - name: Add IWAM_moilogin permissions to moilogin\images
+      raw: 'icacls --% "C:\moilogin\images" /grant "{{ shortdomain }}\IWAM_moilogin":(RX)'
+
+    - name: Add Administrators permissions to moilogin\images
+      raw: 'icacls --% "C:\moilogin\images" /grant "Administrators":(OI)(CI)(F)'
+
+    - name: Create sdp folder
+      win_file: path=C:\sdp state=directory
+
+    - name: Add sdp user permissions to sdp folder
+      raw: 'icacls --% "C:\sdp" /inheritance:r /grant:r "{{ shortdomain }}\sdp":(OI)(CI)(RX)'
+
+    - name: Add Administrator permissions to sdp folder
+      raw: 'icacls --% "C:\sdp" /grant "Administrators":(OI)(CI)(F)'
+
+    - name: Create moi folder
+      win_file: path=C:\moi state=directory
+
+    - name: Add IWAM_moiui permissions to moi folder
+      raw: 'icacls --% "C:\moi" /inheritance:r /grant:r "{{ shortdomain }}\IWAM_moiui":(OI)(CI)(RX)'
+
+    - name: Add Administrators permissions to moi folder
+      raw: 'icacls --% "C:\moi" /grant "Administrators":(OI)(CI)(F)'
+
+    - name: Create healthcheck folder
+      win_file: path=C:\healthcheck state=directory
+
+    - name: Add IAWM_moiui permissions to healthcheck folder
+      raw: 'icacls --% "C:\healthcheck" /inheritance:r /grant:r "{{ shortdomain }}\IWAM_moiui":(OI)(CI)(RX)'
+
+    - name: Add Administrators permissions to healthcheck folder
+      raw: 'icacls --% "C:\healthcheck" /grant "Administrators":(OI)(CI)(F)'
+
+    - name: Create elm-web folder
+      win_file: path=C:\elm-web state=directory
+
+    - name: Add IWAM_moiui permissions to elm-web
+      raw: 'icacls --% "C:\elm-web" /inheritance:r /grant:r "{{ shortdomain }}\IWAM_moiui":(OI)(CI)(RX)'
+
+    - name: Add Adminstrators permissions to elm-web
+      raw: 'icacls --% "C:\elm-web" /grant "Administrators":(OI)(CI)(F)'
+
+
+
+#
+#   IIS User permissions
+# 
+
+    - name: Add IWAM_moiui user to local IIS_IUSRS group
+      raw: net localgroup IIS_IUSRS '{{ shortdomain }}\iwam_moiui' /add 
+      ignore_errors: yes
+
+    - name: Add IWAM_moilogin user to local IIS_IUSRS group
+      raw: net localgroup IIS_IUSRS '{{ shortdomain }}\iwam_moilogin' /add 
+      ignore_errors: yes
+
+    - name: Add sdp user to local IIS_IUSRS group
+      raw: net localgroup IIS_IUSRS '{{ shortdomain }}\sdp' /add 
+      ignore_errors: yes
+
+#
+#   Create Application pools
+#
+
+
+    - name: Create moilogin01 app pool
+      win_iis_webapppool:
+        name: 'moilogin01'
+        state: started
+        attributes: managedRuntimeVersion:v4.0|autoStart:true|preloadEnabled:true|loadUserProfile:false
+      register: moiloginPool1
+
+    - name: Configure moilogin01 app pool
+      raw: import-module WebAdministration;Set-ItemProperty -Path IIS:AppPools/moilogin01 -Name startMode -Value ‘AlwaysRunning’
+
+    - name: Configure moilogin01 app pool processmodel
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/moilogin01; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{shortdomain}}\{{ moilogin_usr }}'; $pool.processModel.password = '{{ moilogin_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;  
+
+    - name: Create sdp app pool
+      win_iis_webapppool:
+        name: 'sdp'
+        state: started
+        attributes: managedRuntimeVersion:v4.0|autoStart:true|preloadEnabled:true|loadUserProfile:false
+      register: sdpPool1
+
+    - name: Configure sdp app pool
+      raw: import-module WebAdministration;Set-ItemProperty -Path IIS:AppPools/sdp -Name startMode -Value ‘AlwaysRunning’
+
+    - name: Configure sdp app pool processmodel      
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/sdp; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{shortdomain}}\{{ sdp_usr }}'; $pool.processModel.password = '{{ sdp_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;
+
+    - name: Create healthcheck app pool
+      win_iis_webapppool:
+        name: 'healthcheck'
+        state: started
+        attributes: managedRuntimeVersion:v4.0|autoStart:true|preloadEnabled:true|loadUserProfile:false
+      register: healthcheckPool1
+
+    - name: Configure healthcheck app pool
+      raw: import-module WebAdministration;Set-ItemProperty -Path IIS:AppPools/healthcheck -Name startMode -Value ‘AlwaysRunning’
+
+    - name: Configure healthcheck app pool processmodel      
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/healthcheck; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{shortdomain}}\{{ moi_usr }}'; $pool.processModel.password = '{{ moi_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;
+
+    - name: Create moi01 app pool
+      win_iis_webapppool:
+        name: 'moi01'
+        state: started
+        attributes: managedRuntimeVersion:v4.0|autoStart:true|preloadEnabled:true|loadUserProfile:false
+      register: moi01Pool1
+
+    - name: Configure moi01 app pool
+      raw: import-module WebAdministration;Set-ItemProperty -Path IIS:AppPools/moi01 -Name startMode -Value ‘AlwaysRunning’
+
+    - name: Configure moi01 app pool processmodel      
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/moi01; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{shortdomain}}\{{ moi_usr }}'; $pool.processModel.password = '{{ moi_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;
+
+    - name: Configure moi01 app pool rapidfail
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/moi01; $pool.failure.loadBalancerCapabilities = 'tcpLevel'; $pool.failure.autoShutdownExe = 'iisreset.exe'; $pool.failure.autoShutdownParams = '/restart' ; $pool | set-item ;
+
+    - name: Configure moi01 qpp pool recycling
+      raw: appcmd set apppool '/apppool.name:' moi01 "/+recycling.periodicRestart.schedule.[value='01:00:00']"
+      ignore_errors: True
+      #raw: import-module WebAdministration; $pool = get-item IIS:apppools/moi01; $pool.recycling.periodicRestart.schedule = '@{value="01:00"}' ; $pool | set-item;
+
+
+    - name: Create elm app pool
+      win_iis_webapppool:
+        name: 'elm'
+        state: started
+        attributes: managedRuntimeVersion:v4.0|autoStart:true|preloadEnabled:true|loadUserProfile:false
+      register: elm
+
+    - name: Configure elm app pool
+      raw: import-module WebAdministration;Set-ItemProperty -Path IIS:AppPools/elm -Name startMode -Value ‘AlwaysRunning’
+
+    - name: Configure elm app pool processmodel
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/elm; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{shortdomain}}\{{ moi_usr }}'; $pool.processModel.password = '{{ moi_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;
+
+    - name: Configure elm app pool rapidfail
+      raw: import-module WebAdministration;$pool = get-item IIS:apppools/elm; $pool.failure.loadBalancerCapabilities = 'tcpLevel'; $pool.failure.autoShutdownExe = 'iisreset.exe'; $pool.failure.autoShutdownParams = '/restart' ; $pool | set-item ;
+
+    - name: Configure elm qpp pool recycling
+      raw: appcmd set apppool '/apppool.name:' elm "/+recycling.periodicRestart.schedule.[value='01:00:00']"
+      ignore_errors: True
+
+
+#
+#   Install an SSL Cert (this could be private)
+#
+
+#    - name: Upload Web Cert
+#      win_copy: src=/ansible/ansible-files/dev2/star-dev2.pfx dest=c:/elm/star-dev2.pfx
+
+#    - name: import cert to windows
+#      raw: 'certutil -p {{ webCertPw }} -importPFX c:\elm\star-dev2.pfx NoExport'
+
+#
+#   Set machine key
+#
+
+    - name: configure machine key settings 1
+      raw: appcmd set config /commit:WEBROOT /section:machineKey /validation:SHA1 /decryptionKey:{{ iisDecKey }} /validationKey:{{ iisValKey }}
+
+#
+#   Create Web Sites
+#
+
+
+    - name: Remove default site
+      win_iis_website:
+        name: 'Default Web Site'
+        state: absent
+
+    - name: Create moilogin web site
+      win_iis_website:
+        name: 'moilogin'
+        state: started
+        port: 80
+        application_pool: moilogin01
+        parameters: 'serverAutoStart:true'
+        hostname: '{{ moilogin_public_hostname }}'
+        physical_path: C:\moilogin 
+        site_id: 10
+
+    - name: Configure moilogin
+      #raw: import-module WebAdministration;$pool = get-item IIS:apppools/moilogin01; $pool.processModel.loadUserProfile = 'true';$pool.processModel.username = '{{ moilogin_usr }}'; $pool.processModel.password = '{{ moilogin_pw }}'; $pool.processModel.identityType = 'SpecificUser' ; $pool | set-item ;
+      raw: import-module WebAdministration;$site = get-item IIS:Sites/moilogin; $site.applicationDefaults.preloadEnabled = 'True'; $site | set-item ; 
+
+    - name: Configure moilogin auth
+      raw: import-module WebAdministration;set-webConfigurationProperty -filter /system.Webserver/security/authentication/anonymousAuthentication -name enabled -value true -PSPath IIS:\ -location moilogin
+
+    - raw: import-module WebAdministration;set-webconfigurationproperty -filter /system.webServer/security/authentication/anonymousAuthentication -name userName -value "" -PSPath IIS:\ -location moilogin
+
+    - name: Configure moilogin sessionstate
+      #raw: 'appcmd set config /commit:WEBROOT /section:sessionSate /mode:SqlServer /compressionEnabled: true /sqlConnectionString: "Server=AAG_moi_B\moi_b;Database=ASPState;Integrated Security=true"" /sqlCommandTimeout: 5 /useHostingIdentity:True'
+      raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name mode -Value SQLServer;
+
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name sqlCommandTimeout -Value "5";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name sqlConnectionString -Value "Server=AAG_moi_A\moi_a;Database=ASPState;Integrated Security=true";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name timeout -Value "7200";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name compressionEnabled -Value "True";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moilogin -Name allowCustomSqlDatabase -Value "True";
+
+##
+## MOI
+##
+
+    - name: Create moi web site
+      win_iis_website:
+        name: 'moi'
+        state: started
+        port: 80
+        ssl: '*'
+        hostname: '{{ moi_public_hostname }}' 
+        application_pool: moi01
+        physical_path: C:\moi
+        site_id: 100
+
+#    - name: Bind SSL Cert to moi website
+#      raw: 'netsh http add sslcert ipport=0.0.0.0:443 certhash={{ webCertHash }} certstorename=MY appid="{{ webCertApp }}"'
+#      ignore_errors: true
+
+#    - name: Bind SSL Cert to moi website part 2
+#      raw: cmd /c "C:\windows\system32\inetsrv\appcmd set site /site.name:moi /+bindings.[protocol='https',bindingInformation='*:443:']"
+#      ignore_errors: true
+      #raw: New-WebBinding -Name "moi" -IP "*" -Port 443 -Protocol https
+      #win_iis_webbinding:
+      #  name: 'moi'
+      #  host_header: '*'
+      #  protocol: https
+      #  ip: '*'
+      #  port: 443
+      #  state: present
+      #  certificate_hash: '"{{ webCertHash }}"'
+
+
+    - name: Configure moi
+      raw: import-module WebAdministration;$site = get-item IIS:Sites/moi; $site.applicationDefaults.preloadEnabled = 'True'; $site | set-item ;
+
+    - name: Configure moi auth
+      raw: import-module WebAdministration;set-webConfigurationProperty -filter /system.Webserver/security/authentication/anonymousAuthentication -name enabled -value true -PSPath IIS:\ -location moi
+
+    - raw: import-module WebAdministration;set-webconfigurationproperty -filter /system.webServer/security/authentication/anonymousAuthentication -name userName -value "" -PSPath IIS:\ -location moi
+
+    - name: Configure moi sessionstate
+      raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name mode -Value SQLServer;
+
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name sqlCommandTimeout -Value "5";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name sqlConnectionString -Value "Server=AAG_moi_B\moi_b;Database=ASPState;Integrated Security=true";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name timeout -Value "7200";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name compressionEnabled -Value "True";
+    - raw: import-module WebAdministration;set-WebConfigurationProperty system.web/sessionState IIS:Sites/moi -Name allowCustomSqlDatabase -Value "True";
+
+##
+## SDP
+##
+
+    - name: Create sdp web site
+      win_iis_website:
+        name: 'sdp'
+        state: started
+        port: 80
+        application_pool: sdp
+        hostname: '{{ sdp_public_hostname }}'
+        physical_path: C:\sdp
+        site_id: 300
+
+    - name: Configure sdp
+      raw: import-module WebAdministration;$site = get-item IIS:Sites/sdp; $site.applicationDefaults.preloadEnabled = 'True'; $site | set-item ;
+
+    - name: configure sdp auth
+      raw: import-module WebAdministration;set-webConfigurationProperty -filter /system.Webserver/security/authentication/anonymousAuthentication -name enabled -value true -PSPath IIS:\ -location sdp
+    - raw: import-module WebAdministration;set-webconfigurationproperty -filter /system.webServer/security/authentication/anonymousAuthentication -name userName -value "" -PSPath IIS:\ -location sdp
+
+##
+## Healthcheck
+##
+
+    - name: Create healthcheck web site
+      win_iis_website:
+        name: 'healthcheck'
+        state: started
+        port: 80
+        application_pool: healthcheck
+        hostname: '{{ healthcheck_hostname }}'
+        physical_path: C:\healthcheck
+        site_id: 999
+
+    - name: Configure healthcheck
+      raw: import-module WebAdministration;$site = get-item IIS:Sites/healtcheck; $site.applicationDefaults.preloadEnabled = 'True'; $site | set-item ;
+
+    - name: Configure healthcheck auth
+      raw: import-module WebAdministration;set-webConfigurationProperty -filter /system.Webserver/security/authentication/anonymousAuthentication -name enabled -value true -PSPath IIS:\ -location healthcheck
+    - raw: import-module WebAdministration;set-webconfigurationproperty -filter /system.webServer/security/authentication/anonymousAuthentication -name userName -value "" -PSPath IIS:\ -location healthcheck
+
+##
+## ELM
+##
+
+    - name: Create elm web site
+      win_iis_website:
+        name: 'elm'
+        state: started
+        port: 80
+        application_pool: elm
+        parameters: 'serverAutoStart:true'
+        hostname: '{{ elm_public_hostname }}'
+        physical_path: C:\elm
+        site_id: 150
+
+    - name: Configure elm
+      raw: import-module WebAdministration;$site = get-item IIS:Sites/elm; $site.applicationDefaults.preloadEnabled = 'True'; $site | set-item ;
+
+    - name: Configure elm auth
+      raw: import-module WebAdministration;set-webConfigurationProperty -filter /system.Webserver/security/authentication/anonymousAuthentication -name enabled -value true -PSPath IIS:\ -location elm
